@@ -109,6 +109,53 @@ def test_client_handle_song_update_tracks_stats(monkeypatch):
     assert websocket.messages[-1]["type"] == "state"
 
 
+def test_client_handle_song_update_preserves_error_details(monkeypatch):
+    monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
+
+    web_utils.app_state.web_settings = {
+        "host": "127.0.0.1",
+        "port": 8800,
+        "keep_alive": True,
+        "web_use_output_dir": False,
+        "keep_sessions": True,
+    }
+    web_utils.app_state.downloader_settings = DownloaderOptions(
+        **create_settings_type(Namespace(config=False), {}, DOWNLOADER_OPTIONS)
+    )
+    web_utils.app_state.loop = asyncio.new_event_loop()
+
+    websocket = FakeWebSocket()
+    client = web_utils.Client(websocket, "dashboard-error-test")
+    song = _build_song()
+
+    asyncio.run(
+        client.handle_song_update(
+            0,
+            {
+                "song": song.json,
+                "progress": 0,
+                "message": "Error",
+                "error_message": "yt-dlp failed to get metadata",
+                "error_type": "DownloaderError",
+                "error_traceback": "Traceback details",
+                "overall_progress": 0,
+                "overall_completed": 1,
+                "overall_total": 1,
+            },
+        )
+    )
+
+    snapshot = client.get_state_snapshot()
+    song_state = snapshot["songs"][0]
+    latest_event = snapshot["events"][-1]
+
+    assert song_state["status"] == "error"
+    assert song_state["error_message"] == "yt-dlp failed to get metadata"
+    assert song_state["error_type"] == "DownloaderError"
+    assert latest_event["details"]["error_message"] == "yt-dlp failed to get metadata"
+    assert latest_event["details"]["error_traceback"] == "Traceback details"
+
+
 def test_finish_query_download_creates_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
     monkeypatch.setattr(web_utils, "get_spotdl_path", lambda: Path(tmp_path))

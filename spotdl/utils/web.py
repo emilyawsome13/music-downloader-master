@@ -780,6 +780,9 @@ class Client:  # pylint: disable=too-many-public-methods
                 "progress": current_progress,
                 "message": current_message,
                 "status": self._normalize_status(current_message),
+                "error_message": update.get("error_message"),
+                "error_type": update.get("error_type"),
+                "error_traceback": update.get("error_traceback"),
                 "updated_at": self._timestamp(),
                 "song": song_data,
             }
@@ -803,6 +806,9 @@ class Client:  # pylint: disable=too-many-public-methods
                         "overall_progress": update["overall_progress"],
                         "overall_completed": update["overall_completed"],
                         "overall_total": update["overall_total"],
+                        "error_message": update.get("error_message"),
+                        "error_type": update.get("error_type"),
+                        "error_traceback": update.get("error_traceback"),
                     },
                 }
             )
@@ -1243,6 +1249,9 @@ class Client:  # pylint: disable=too-many-public-methods
             "song": progress_handler.song.json,
             "progress": progress_handler.progress,
             "message": message,
+            "error_message": getattr(progress_handler, "last_error_message", None),
+            "error_type": getattr(progress_handler, "last_error_type", None),
+            "error_traceback": getattr(progress_handler, "last_error_traceback", None),
             "overall_progress": round(
                 (
                     (

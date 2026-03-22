@@ -274,6 +274,9 @@ class SongTracker:
         self.progress: int = 0
         self.old_progress: int = 0
         self.status = ""
+        self.last_error_message: Optional[str] = None
+        self.last_error_type: Optional[str] = None
+        self.last_error_traceback: Optional[str] = None
 
         if not self.parent.simple_tui:
             self.task_id = self.parent.rich_progress_bar.add_task(
@@ -350,6 +353,9 @@ class SongTracker:
         - finish: Whether to finish the task.
         """
 
+        self.last_error_message = str(traceback)
+        self.last_error_type = traceback.__class__.__name__
+        self.last_error_traceback = message
         self.update("Error")
         if finish:
             self.progress = 100
