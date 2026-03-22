@@ -1,7 +1,10 @@
 import asyncio
+import io
 import zipfile
 from argparse import Namespace
 from pathlib import Path
+
+from starlette.datastructures import UploadFile
 
 from spotdl.types.options import DownloaderOptions
 from spotdl.types.song import Song
@@ -606,3 +609,90 @@ def test_stale_song_update_is_ignored_after_cancel(monkeypatch):
     )
 
     assert client.song_states == {}
+
+
+def test_upload_cookie_file_updates_client_settings(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
+    monkeypatch.setattr(web_utils, "get_spotdl_path", lambda: Path(tmp_path))
+
+    web_utils.app_state.web_settings = {
+        "host": "127.0.0.1",
+        "port": 8800,
+        "keep_alive": True,
+        "web_use_output_dir": False,
+        "keep_sessions": True,
+    }
+    web_utils.app_state.downloader_settings = DownloaderOptions(
+        **create_settings_type(Namespace(config=False), {}, DOWNLOADER_OPTIONS)
+    )
+    web_utils.app_state.loop = asyncio.new_event_loop()
+    web_utils.app_state.logger = web_utils.logging.getLogger("spotdl-web-test")
+
+    async def runner():
+        websocket = FakeWebSocket()
+        client = web_utils.Client(websocket, "cookie-upload-test")
+        upload = UploadFile(
+            filename="cookies.txt",
+            file=io.BytesIO(
+                b"# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t0\tSID\tcookie\n"
+            ),
+        )
+
+        result = await web_utils.upload_cookie_file(
+            file=upload,
+            client=client,
+            state=web_utils.app_state,
+        )
+
+        configured_path = client.downloader_settings["cookie_file"]
+
+        assert result["cookie_file_configured"] is True
+        assert isinstance(configured_path, str)
+        assert Path(configured_path).is_file()
+        assert (
+            Path(configured_path)
+            .read_text(encoding="utf-8")
+            .startswith("# Netscape HTTP Cookie File")
+        )
+        assert client.get_state_snapshot()["server"]["cookie_file_configured"] is True
+
+    asyncio.run(runner())
+
+
+def test_clear_cookie_file_removes_session_cookie(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
+    monkeypatch.setattr(web_utils, "get_spotdl_path", lambda: Path(tmp_path))
+
+    web_utils.app_state.web_settings = {
+        "host": "127.0.0.1",
+        "port": 8800,
+        "keep_alive": True,
+        "web_use_output_dir": False,
+        "keep_sessions": True,
+    }
+    web_utils.app_state.downloader_settings = DownloaderOptions(
+        **create_settings_type(Namespace(config=False), {}, DOWNLOADER_OPTIONS)
+    )
+    web_utils.app_state.loop = asyncio.new_event_loop()
+    web_utils.app_state.logger = web_utils.logging.getLogger("spotdl-web-test")
+
+    async def runner():
+        websocket = FakeWebSocket()
+        client = web_utils.Client(websocket, "cookie-clear-test")
+        cookie_dir = Path(tmp_path) / "web" / "cookies" / client.client_id
+        cookie_dir.mkdir(parents=True, exist_ok=True)
+        cookie_path = cookie_dir / "youtube-cookies.txt"
+        cookie_path.write_text("cookie-data", encoding="utf-8")
+        client.downloader_settings["cookie_file"] = str(cookie_path)
+
+        result = await web_utils.clear_cookie_file(
+            client=client,
+            state=web_utils.app_state,
+        )
+
+        assert result == {"cookie_file_configured": False}
+        assert client.downloader_settings["cookie_file"] is None
+        assert not cookie_path.exists()
+        assert client.get_state_snapshot()["server"]["cookie_file_configured"] is False
+
+    asyncio.run(runner())

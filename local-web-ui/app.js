@@ -17,6 +17,10 @@ const state = {
 
 const DEFAULT_OUTPUT_TEMPLATE = "{album-artist}/{album}/{title}.{output-ext}";
 const LEGACY_OUTPUT_TEMPLATE = "{artists} - {title}.{output-ext}";
+const DEFAULT_COOKIE_HINT = "If YouTube says \"Sign in to confirm you're not a bot\", upload a cookies.txt file for this session.";
+const ACTIVE_COOKIE_HINT = "YouTube cookies are loaded for this session.";
+const COOKIE_READY_HINT = "YouTube cookies are loaded. Start the download again for this session.";
+const BOT_BLOCK_COOKIE_HINT = "YouTube is blocking the hosted downloader. Upload a cookies.txt file, then retry the download.";
 const AUDIO_PROVIDER_FALLBACKS = {
     "youtube-music": ["youtube-music", "youtube"],
     youtube: ["youtube", "youtube-music"],
@@ -36,6 +40,10 @@ const elements = {
     audioProviderSelect: document.getElementById("audioProviderSelect"),
     overwriteSelect: document.getElementById("overwriteSelect"),
     outputInput: document.getElementById("outputInput"),
+    cookieFileInput: document.getElementById("cookieFileInput"),
+    uploadCookieButton: document.getElementById("uploadCookieButton"),
+    clearCookieButton: document.getElementById("clearCookieButton"),
+    cookieHint: document.getElementById("cookieHint"),
     deliverToDeviceCheckbox: document.getElementById("deliverToDeviceCheckbox"),
     downloadButton: document.getElementById("downloadButton"),
     cancelButton: document.getElementById("cancelButton"),
@@ -80,6 +88,20 @@ function request(path, options = {}) {
     });
 }
 
+async function requestForm(path, formData) {
+    const response = await fetch(path, {
+        method: "POST",
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Request failed: ${response.status}`);
+    }
+
+    return response.json();
+}
+
 function fillSelect(select, choices, currentValue) {
     select.innerHTML = "";
     for (const choice of choices) {
@@ -122,6 +144,14 @@ function isActiveJob(status) {
 
 function isFinishedJob(status) {
     return status === "complete" || status === "complete-with-errors";
+}
+
+function hasBotBlockError(snapshot) {
+    const songs = snapshot?.songs || [];
+    return songs.some((song) => {
+        const details = `${song.error_message || ""}\n${song.error_traceback || ""}`.toLowerCase();
+        return details.includes("not a bot");
+    });
 }
 
 function setClientId(nextClientId) {
@@ -371,6 +401,8 @@ function renderState(snapshot, websocketPayload = null) {
     state.snapshot = snapshot;
 
     const { job, stats, songs, downloads, bundle, events, latest_update: latestUpdate, server } = snapshot;
+    const cookieConfigured = Boolean(server?.cookie_file_configured);
+    const blockedByYouTube = hasBotBlockError(snapshot);
     elements.clientIdLabel.textContent = clientId;
     elements.jobState.textContent = job.status;
     elements.serverAddress.textContent = `${window.location.origin}`;
@@ -383,6 +415,19 @@ function renderState(snapshot, websocketPayload = null) {
     elements.globalProgressBar.style.width = `${stats.progress}%`;
     elements.actionHint.textContent = job.message || "Ready";
     elements.cancelButton.disabled = !isActiveJob(job?.status);
+    elements.clearCookieButton.disabled = !cookieConfigured;
+
+    if (cookieConfigured) {
+        elements.cookieHint.textContent = ACTIVE_COOKIE_HINT;
+        if (blockedByYouTube && !isActiveJob(job?.status)) {
+            elements.actionHint.textContent = COOKIE_READY_HINT;
+        }
+    } else if (blockedByYouTube) {
+        elements.cookieHint.textContent = BOT_BLOCK_COOKIE_HINT;
+        elements.actionHint.textContent = BOT_BLOCK_COOKIE_HINT;
+    } else {
+        elements.cookieHint.textContent = DEFAULT_COOKIE_HINT;
+    }
 
     renderQueue(songs || []);
     renderBundle(bundle || null, job?.status || "idle");
@@ -511,9 +556,54 @@ async function cancelDownload() {
     }
 }
 
+async function uploadCookieFile() {
+    const file = elements.cookieFileInput.files?.[0];
+    if (!file) {
+        elements.actionHint.textContent = "Choose a cookies.txt file first.";
+        return;
+    }
+
+    try {
+        elements.uploadCookieButton.disabled = true;
+        elements.actionHint.textContent = "Uploading YouTube cookies for this session...";
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        await requestForm(`/api/settings/upload-cookie?client_id=${encodeURIComponent(clientId)}`, formData);
+        elements.cookieFileInput.value = "";
+        await refreshState();
+        elements.actionHint.textContent = COOKIE_READY_HINT;
+    } catch (error) {
+        elements.actionHint.textContent = error.message;
+        elements.debugOutput.textContent = error.stack || String(error);
+    } finally {
+        elements.uploadCookieButton.disabled = false;
+    }
+}
+
+async function clearCookieFile() {
+    try {
+        elements.clearCookieButton.disabled = true;
+        elements.actionHint.textContent = "Clearing YouTube cookies for this session...";
+
+        await request(`/api/settings/clear-cookie?client_id=${encodeURIComponent(clientId)}`, {
+            method: "POST",
+        });
+
+        elements.cookieFileInput.value = "";
+        await refreshState();
+        elements.actionHint.textContent = "YouTube cookies cleared for this session.";
+    } catch (error) {
+        elements.actionHint.textContent = error.message;
+        elements.debugOutput.textContent = error.stack || String(error);
+    }
+}
+
 function startFreshSession() {
     state.autoDeviceDeliveryArmed = false;
     state.deliveredBundlePath = null;
+    elements.cookieFileInput.value = "";
 
     if (state.reconnectTimer) {
         clearTimeout(state.reconnectTimer);
@@ -539,6 +629,8 @@ function startFreshSession() {
 
 elements.downloadButton.addEventListener("click", startDownload);
 elements.cancelButton.addEventListener("click", cancelDownload);
+elements.uploadCookieButton.addEventListener("click", uploadCookieFile);
+elements.clearCookieButton.addEventListener("click", clearCookieFile);
 elements.newSessionButton.addEventListener("click", startFreshSession);
 elements.refreshStateButton.addEventListener("click", refreshState);
 elements.deliverToDeviceCheckbox.addEventListener("change", persistDeviceDeliveryPreference);

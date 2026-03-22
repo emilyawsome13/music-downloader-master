@@ -225,6 +225,30 @@ textarea {
     margin-top: 18px;
 }
 
+.cookie-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) auto minmax(260px, 1fr);
+    gap: 14px;
+    align-items: end;
+    margin-top: 16px;
+}
+
+.cookie-field input[type="file"] {
+    padding: 10px 12px;
+}
+
+.cookie-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.cookie-hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
+
 .action-row {
     display: flex;
     align-items: center;
@@ -517,11 +541,13 @@ textarea {
         padding: 16px;
     }
 
-    .settings-grid {
+    .settings-grid,
+    .cookie-row {
         grid-template-columns: 1fr;
     }
 
     .action-row,
+    .cookie-actions,
     .section-heading,
     .song-header,
     .download-header,

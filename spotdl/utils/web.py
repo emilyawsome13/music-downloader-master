@@ -23,9 +23,11 @@ from fastapi import (
     Body,
     Depends,
     FastAPI,
+    File,
     HTTPException,
     Query,
     Response,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -182,6 +184,37 @@ def _is_path_within_root(file_path: Path, root_path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _get_client_cookie_dir(client_id: str) -> Path:
+    """
+    Get the session cookie directory for a web client.
+
+    ### Arguments
+    - client_id: browser session id
+
+    ### Returns
+    - cookie directory path
+    """
+
+    cookie_dir = get_spotdl_path() / "web" / "cookies" / client_id
+    cookie_dir.mkdir(parents=True, exist_ok=True)
+    return cookie_dir
+
+
+def _reinitialize_client_downloader(
+    client: "Client", state: "ApplicationState"
+) -> None:
+    """
+    Rebuild a client's downloader after settings changes.
+
+    ### Arguments
+    - client: client state
+    - state: application state
+    """
+
+    client.downloader = Downloader(client.downloader_settings, loop=state.loop)
+    client.downloader.progress_handler.web_ui = True
 
 
 class SPAStaticFiles(StaticFiles):
@@ -697,6 +730,9 @@ class Client:  # pylint: disable=too-many-public-methods
                 "keep_alive": app_state.web_settings["keep_alive"],
                 "web_use_output_dir": app_state.web_settings["web_use_output_dir"],
                 "output_root": self.get_output_root(),
+                "cookie_file_configured": bool(
+                    self.downloader_settings.get("cookie_file")
+                ),
             },
         }
 
@@ -1759,12 +1795,96 @@ def update_settings(
 
     # Re-initialize downloader
     client.downloader_settings = new_settings
-    client.downloader = Downloader(
-        new_settings,
-        loop=state.loop,
-    )
+    _reinitialize_client_downloader(client, state)
 
     return new_settings
+
+
+@router.post("/api/settings/upload-cookie")
+async def upload_cookie_file(
+    file: UploadFile = File(...),
+    client: Client = Depends(get_client),
+    state: ApplicationState = Depends(get_current_state),
+) -> Dict[str, Any]:
+    """
+    Upload a YouTube cookies.txt file for the current browser session.
+
+    ### Arguments
+    - file: uploaded cookies.txt file
+    - client: client state
+    - state: application state
+
+    ### Returns
+    - session cookie status
+    """
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Choose a cookies.txt file first.")
+
+    if not file.filename.lower().endswith(".txt"):
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a Netscape-format cookies.txt file.",
+        )
+
+    cookie_bytes = await file.read()
+    if len(cookie_bytes.strip()) == 0:
+        raise HTTPException(
+            status_code=400, detail="The uploaded cookie file is empty."
+        )
+
+    cookie_dir = _get_client_cookie_dir(client.client_id)
+    cookie_path = cookie_dir / "youtube-cookies.txt"
+    cookie_path.write_bytes(cookie_bytes)
+
+    client.downloader_settings["cookie_file"] = str(cookie_path)
+    _reinitialize_client_downloader(client, state)
+
+    await client.add_event(
+        "info",
+        "YouTube cookies uploaded for this session.",
+        kind="diagnostic",
+        details={"filename": file.filename},
+    )
+
+    return {
+        "cookie_file_configured": True,
+        "filename": file.filename,
+    }
+
+
+@router.post("/api/settings/clear-cookie")
+async def clear_cookie_file(
+    client: Client = Depends(get_client),
+    state: ApplicationState = Depends(get_current_state),
+) -> Dict[str, Any]:
+    """
+    Remove the session-scoped YouTube cookie file.
+
+    ### Arguments
+    - client: client state
+    - state: application state
+
+    ### Returns
+    - session cookie status
+    """
+
+    existing_cookie_file = client.downloader_settings.get("cookie_file")
+    if isinstance(existing_cookie_file, str) and existing_cookie_file:
+        cookie_path = Path(existing_cookie_file)
+        if cookie_path.exists():
+            cookie_path.unlink()
+
+    client.downloader_settings["cookie_file"] = None
+    _reinitialize_client_downloader(client, state)
+
+    await client.add_event(
+        "info",
+        "YouTube cookies cleared for this session.",
+        kind="diagnostic",
+    )
+
+    return {"cookie_file_configured": False}
 
 
 @router.get("/api/check_update")

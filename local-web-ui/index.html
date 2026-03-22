@@ -77,6 +77,20 @@
                     </label>
                 </div>
 
+                <div class="cookie-row">
+                    <label class="field cookie-field">
+                        <span>YouTube Cookies</span>
+                        <input id="cookieFileInput" type="file" accept=".txt,text/plain">
+                    </label>
+                    <div class="cookie-actions">
+                        <button id="uploadCookieButton" class="ghost-button" type="button">Upload Cookies</button>
+                        <button id="clearCookieButton" class="ghost-button" type="button" disabled>Clear Cookies</button>
+                    </div>
+                    <p id="cookieHint" class="cookie-hint">
+                        If YouTube says "Sign in to confirm you're not a bot", upload a cookies.txt file for this session.
+                    </p>
+                </div>
+
                 <div class="action-row">
                     <button id="downloadButton" class="primary-button" type="button">Start Download</button>
                     <button id="cancelButton" class="ghost-button" type="button" disabled>Cancel Job</button>
