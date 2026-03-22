@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>spotDL Control Room</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="hero">
+            <div class="hero-copy">
+                <p class="eyebrow">spotDL Control Room</p>
+                <h1>Download on your phone. Watch every step live.</h1>
+                <p class="hero-text">
+                    Paste a track, playlist, album, artist, or YouTube Music artist link and keep an eye on
+                    progress, diagnostics, and result files from one dashboard.
+                </p>
+            </div>
+
+            <section class="hero-status panel">
+                <div class="status-line">
+                    <span>Connection</span>
+                    <strong id="connectionState" class="badge offline">Offline</strong>
+                </div>
+                <div class="status-line">
+                    <span>Job</span>
+                    <strong id="jobState">Idle</strong>
+                </div>
+                <div class="status-line">
+                    <span>Client ID</span>
+                    <code id="clientIdLabel">-</code>
+                </div>
+                <div class="status-line">
+                    <span>Server</span>
+                    <strong id="serverAddress">-</strong>
+                </div>
+            </section>
+        </header>
+
+        <main class="dashboard-grid">
+            <section class="panel composer">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Start a Job</p>
+                        <h2>Queue downloads</h2>
+                    </div>
+                    <button id="refreshStateButton" class="ghost-button" type="button">Refresh State</button>
+                </div>
+
+                <label class="field">
+                    <span>Query</span>
+                    <textarea id="queryInput" rows="5" placeholder="Paste a Spotify link, YouTube Music artist link, YouTube @handle, or use ytartist: Artist Name"></textarea>
+                </label>
+
+                <div class="settings-grid">
+                    <label class="field">
+                        <span>Format</span>
+                        <select id="formatSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>Bitrate</span>
+                        <select id="bitrateSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>Audio Provider</span>
+                        <select id="audioProviderSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>Overwrite</span>
+                        <select id="overwriteSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>Output</span>
+                        <input id="outputInput" type="text" placeholder="{album-artist}/{album}/{title}.{output-ext}">
+                    </label>
+                </div>
+
+                <div class="action-row">
+                    <button id="downloadButton" class="primary-button" type="button">Start Download</button>
+                    <label class="device-delivery-toggle" for="deliverToDeviceCheckbox">
+                        <input id="deliverToDeviceCheckbox" type="checkbox" checked>
+                        <span>Also save the finished ZIP to this device</span>
+                    </label>
+                    <p id="actionHint" class="action-hint">
+                        Use multiple lines to queue more than one query at once.
+                    </p>
+                </div>
+            </section>
+
+            <section class="stats-grid">
+                <article class="metric-card panel">
+                    <span>Total</span>
+                    <strong id="statTotal">0</strong>
+                    <small>Resolved songs in this session</small>
+                </article>
+                <article class="metric-card panel">
+                    <span>Active</span>
+                    <strong id="statActive">0</strong>
+                    <small>Currently processing</small>
+                </article>
+                <article class="metric-card panel">
+                    <span>Done</span>
+                    <strong id="statCompleted">0</strong>
+                    <small>Finished with files</small>
+                </article>
+                <article class="metric-card panel">
+                    <span>Errors</span>
+                    <strong id="statFailed">0</strong>
+                    <small>Needs attention</small>
+                </article>
+                <article class="metric-card panel progress-card">
+                    <span>Average Progress</span>
+                    <strong id="statProgress">0%</strong>
+                    <div class="big-progress">
+                        <div id="globalProgressBar"></div>
+                    </div>
+                    <small id="statResolved">0 resolved</small>
+                </article>
+            </section>
+
+            <section class="panel queue-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Live Queue</p>
+                        <h2>Song progress</h2>
+                    </div>
+                </div>
+                <div id="queueList" class="queue-list empty-state">
+                    No songs yet. Start a download to populate the queue.
+                </div>
+            </section>
+
+            <section class="panel results-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Results</p>
+                        <h2>Downloaded files</h2>
+                    </div>
+                </div>
+                <div id="bundlePanel" class="bundle-panel is-hidden">
+                    <a id="downloadBundleLink" class="primary-button bundle-link" href="#" download>Save All to This Device</a>
+                    <p id="bundleHint" class="bundle-hint">When the job finishes, one archive with every completed file will appear here and can be saved to the phone or computer you are using.</p>
+                </div>
+                <div id="downloadsList" class="downloads-list empty-state">
+                    Completed files will appear here.
+                </div>
+            </section>
+
+            <section class="panel diagnostics-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Diagnostics</p>
+                        <h2>Event stream</h2>
+                    </div>
+                </div>
+                <div id="eventsList" class="events-list empty-state">
+                    Waiting for diagnostics.
+                </div>
+            </section>
+
+            <section class="panel debug-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Debug</p>
+                        <h2>Latest raw update</h2>
+                    </div>
+                </div>
+                <pre id="debugOutput" class="debug-output">No updates yet.</pre>
+            </section>
+        </main>
+    </div>
+
+    <script src="./app.js" defer></script>
+</body>
+</html>

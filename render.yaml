@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: spotdl-control-room
+    runtime: python
+    buildCommand: pip install -e . && python -m spotdl --download-ffmpeg
+    startCommand: uvicorn spotdl.render_app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/version
+    autoDeploy: true
+    envVars:
+      - key: SPOTDL_DATA_DIR
+        value: /opt/render/project/src/.render-spotdl
+      - key: SPOTDL_AUDIO_PROVIDERS
+        value: youtube-music,youtube
+      - key: SPOTDL_BITRATE
+        value: 192k
+      - key: SPOTDL_FORMAT
+        value: mp3
+      - key: SPOTDL_LOG_LEVEL
+        value: INFO
+      - key: SPOTDL_CLIENT_ID
+        sync: false
+      - key: SPOTDL_CLIENT_SECRET
+        sync: false
