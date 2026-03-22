@@ -1151,6 +1151,19 @@ router = APIRouter()
 app_state: ApplicationState = ApplicationState()
 
 
+def _get_bundled_favicon_path() -> Path:
+    """
+    Get the bundled dashboard favicon path.
+
+    ### Returns
+    - path to the favicon asset
+    """
+
+    return (
+        Path(__file__).resolve().parents[2] / "local-web-ui" / "favicon.svg"
+    ).resolve()
+
+
 def get_current_state() -> ApplicationState:
     """
     Get the current state of the application.
@@ -1294,6 +1307,22 @@ def version() -> str:
     """
 
     return __version__
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """
+    Serve the bundled favicon for the dashboard.
+
+    ### Returns
+    - favicon file response
+    """
+
+    favicon_path = _get_bundled_favicon_path()
+    if not favicon_path.is_file():
+        raise HTTPException(status_code=404, detail="Favicon not found.")
+
+    return FileResponse(favicon_path, media_type="image/svg+xml")
 
 
 @router.on_event("shutdown")

@@ -241,7 +241,9 @@ def test_finish_query_download_deduplicates_bundle_entries(monkeypatch, tmp_path
     output_file = output_dir / "Dashboard Song.mp3"
     output_file.write_bytes(b"fake audio bytes")
 
-    asyncio.run(client.finish_query_download([(song, output_file), (song, output_file)], []))
+    asyncio.run(
+        client.finish_query_download([(song, output_file), (song, output_file)], [])
+    )
 
     snapshot = client.get_state_snapshot()
     bundle = snapshot["bundle"]
@@ -316,7 +318,9 @@ def test_start_download_query_clears_session_output(monkeypatch, tmp_path):
 
     websocket = FakeWebSocket()
     client = web_utils.Client(websocket, "session-clear-test")
-    monkeypatch.setattr(client, "_run_download_query_task", fake_run_download_query_task)
+    monkeypatch.setattr(
+        client, "_run_download_query_task", fake_run_download_query_task
+    )
 
     output_dir = Path(client.get_output_root())
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -390,7 +394,9 @@ def test_get_client_restores_session_downloads_without_websocket(monkeypatch, tm
     web_utils.app_state.loop = asyncio.new_event_loop()
     web_utils.app_state.clients = {}
 
-    output_dir = Path(tmp_path) / "web/sessions/restored-client/Debug Artist/Debug Album"
+    output_dir = (
+        Path(tmp_path) / "web/sessions/restored-client/Debug Artist/Debug Album"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / "Dashboard Song.mp3"
     output_file.write_bytes(b"fake audio bytes")
@@ -449,4 +455,16 @@ def test_reconnect_preserves_existing_client_state(monkeypatch):
     assert restored_client.current_job["status"] == "idle"
     assert restored_client.song_states[song.url]["message"] == "Downloading"
     assert replacement_socket.accepted is True
-    assert replacement_socket.messages[-1]["state"]["songs"][0]["message"] == "Downloading"
+    assert (
+        replacement_socket.messages[-1]["state"]["songs"][0]["message"] == "Downloading"
+    )
+
+
+def test_favicon_route_serves_bundled_asset():
+    response = web_utils.favicon()
+    response_path = str(response.path)
+
+    assert response_path.endswith(
+        "local-web-ui\\favicon.svg"
+    ) or response_path.endswith("local-web-ui/favicon.svg")
+    assert response.media_type == "image/svg+xml"
