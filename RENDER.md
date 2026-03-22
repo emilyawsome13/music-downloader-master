@@ -23,7 +23,8 @@ This project is set up to run as a Render web service.
 
 - The app starts with:
   `uvicorn spotdl.render_app:app --host 0.0.0.0 --port $PORT`
-- FFmpeg is downloaded during the Render build step.
+- FFmpeg is prepared during the Render build step with:
+  `python -m spotdl.render_build`
 - Runtime data is stored under `SPOTDL_DATA_DIR`.
 - By default, the web dashboard keeps downloads in session folders and sends finished files or ZIPs back to the device using the site.
 - If you want server-side files to survive restarts, point `SPOTDL_DATA_DIR` to a persistent disk mount in Render.

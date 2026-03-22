@@ -2,7 +2,7 @@ services:
   - type: web
     name: spotdl-control-room
     runtime: python
-    buildCommand: pip install -e . && python -m spotdl --download-ffmpeg
+    buildCommand: pip install -e . && python -m spotdl.render_build
     startCommand: uvicorn spotdl.render_app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/version
     autoDeploy: true
