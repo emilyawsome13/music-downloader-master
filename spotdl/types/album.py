@@ -52,9 +52,8 @@ class Album(SongList):
         }
 
         album_response = album_metadata.get("tracks")
-        if (
-            not isinstance(album_response, dict)
-            or not isinstance(album_response.get("items"), list)
+        if not isinstance(album_response, dict) or not isinstance(
+            album_response.get("items"), list
         ):
             album_response = spotify_client.album_tracks(url)
             if album_response is None:

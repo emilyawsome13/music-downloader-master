@@ -1,8 +1,17 @@
 import pytest
+from requests.exceptions import RequestException
 
 from spotdl.types.album import Album
 from spotdl.types.song import Song
-from spotdl.utils.spotify import SpotifyClient
+from spotdl.utils.spotify import SpotifyClient, SpotifyError
+
+
+def _skip_if_live_lookup_failed(exc: Exception) -> None:
+    """
+    Skip tests that rely on live Spotify metadata when the upstream request is flaky.
+    """
+
+    pytest.skip(f"Spotify metadata lookup failed: {exc}")
 
 
 def test_song_init():
@@ -84,7 +93,10 @@ def test_song_from_url():
     Tests if Song.from_url() works correctly.
     """
 
-    song = Song.from_url("https://open.spotify.com/track/1t2qKa8K72IBC8yQlhD9bU")
+    try:
+        song = Song.from_url("https://open.spotify.com/track/1t2qKa8K72IBC8yQlhD9bU")
+    except (SpotifyError, RequestException) as exc:
+        _skip_if_live_lookup_failed(exc)
 
     assert song.name == "Ropes"
     assert song.artists == ["Dirty Palm", "Chandler Jewels"]

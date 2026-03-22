@@ -102,7 +102,7 @@ def web(web_settings: WebOptions, downloader_settings: DownloaderOptions):
     elif bundled_web_app_dir.exists():
         web_app_dir = bundled_web_app_dir.resolve()
         logger.info("Using bundled web app: %s", web_app_dir)
-    elif (not dist_dir.exists() or web_settings["force_update_gui"]):
+    elif not dist_dir.exists() or web_settings["force_update_gui"]:
         if web_settings["web_gui_repo"] is None:
             gui_repo = "https://github.com/spotdl/web-ui/tree/master/dist"
         else:

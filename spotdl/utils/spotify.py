@@ -231,7 +231,8 @@ class SpotifyClient(Spotify, metaclass=Singleton):
                 if wait_seconds > MAX_RATE_LIMIT_WAIT_SECONDS:
                     raise SpotifyError(
                         "Spotify rate limit reached. "
-                        f"Retry-After was {wait_seconds} seconds, so spotDL will not block waiting that long. "
+                        f"Retry-After was {wait_seconds} seconds, so spotDL will not "
+                        "block waiting that long. "
                         "Try again later or rely on cached metadata when available."
                     ) from exc
 
@@ -271,7 +272,8 @@ def save_spotify_cache(cache: Dict[str, Optional[Dict]]):
     cache = {
         key: value
         for key, value in cache.items()
-        if value is not None and any(fragment in key for fragment in CACHEABLE_URL_FRAGMENTS)
+        if value is not None
+        and any(fragment in key for fragment in CACHEABLE_URL_FRAGMENTS)
     }
 
     with open(cache_file_loc, "w", encoding="utf-8") as cache_file:

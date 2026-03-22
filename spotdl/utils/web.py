@@ -3,6 +3,8 @@ Module which contains the web server related function
 FastAPI routes/classes etc.
 """
 
+# pylint: disable=too-many-lines
+
 import argparse
 import asyncio
 import datetime
@@ -14,7 +16,7 @@ import traceback
 import zipfile
 from argparse import Namespace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from fastapi import (
     APIRouter,
@@ -137,7 +139,7 @@ def _normalize_web_output_template(output: Optional[str]) -> str:
         return DEFAULT_WEB_OUTPUT_TEMPLATE
 
     output = output.strip()
-    if output == "" or output == LEGACY_WEB_OUTPUT_TEMPLATE:
+    if output in ("", LEGACY_WEB_OUTPUT_TEMPLATE):
         return DEFAULT_WEB_OUTPUT_TEMPLATE
 
     return output
@@ -158,11 +160,9 @@ def _normalize_web_downloader_settings(settings: Dict[str, Any]) -> DownloaderOp
     settings_cpy["audio_providers"] = _normalize_web_audio_providers(
         settings_cpy.get("audio_providers")
     )
-    settings_cpy["output"] = _normalize_web_output_template(
-        settings_cpy.get("output")
-    )
+    settings_cpy["output"] = _normalize_web_output_template(settings_cpy.get("output"))
 
-    return DownloaderOptions(**settings_cpy)  # type: ignore[arg-type]
+    return cast(DownloaderOptions, settings_cpy)
 
 
 def _is_path_within_root(file_path: Path, root_path: Path) -> bool:
@@ -366,7 +366,9 @@ class Client:
             return self.downloader_settings["output"]
 
         return str(
-            (Path(self.get_output_root()) / self.downloader_settings["output"]).absolute()
+            (
+                Path(self.get_output_root()) / self.downloader_settings["output"]
+            ).absolute()
         )
 
     def get_output_root_path(self) -> Path:
@@ -427,6 +429,13 @@ class Client:
 
         self.completed_downloads = completed_downloads
         self.download_bundle = self._create_download_bundle(completed_downloads)
+
+    def refresh_completed_downloads_from_output(self):
+        """
+        Refresh completed downloads from disk for reconnecting clients.
+        """
+
+        self._refresh_completed_downloads_from_output()
 
     def _clear_session_output_root(self):
         """
@@ -493,7 +502,9 @@ class Client:
         seen_file_paths = set()
         used_archive_names: Dict[str, int] = {}
 
-        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(
+            bundle_path, "w", compression=zipfile.ZIP_DEFLATED
+        ) as archive:
             for download in completed_downloads:
                 file_path_str = download.get("path")
                 if not file_path_str:
@@ -519,7 +530,9 @@ class Client:
                 archive_key = archive_name.lower()
                 duplicate_index = used_archive_names.get(archive_key, 0)
                 if duplicate_index > 0:
-                    archive_name = f"{archive_stem} ({duplicate_index + 1}){archive_suffix}"
+                    archive_name = (
+                        f"{archive_stem} ({duplicate_index + 1}){archive_suffix}"
+                    )
 
                 used_archive_names[archive_key] = duplicate_index + 1
 
@@ -605,9 +618,7 @@ class Client:
             key=lambda state: state.get("queue_position", 0),
         )
 
-        completed = len(
-            [song for song in song_list if song.get("status") == "done"]
-        )
+        completed = len([song for song in song_list if song.get("status") == "done"])
         failed = len([song for song in song_list if song.get("status") == "error"])
         skipped = len([song for song in song_list if song.get("status") == "skipped"])
         active = len(
@@ -734,10 +745,11 @@ class Client:
         )
 
         event = None
-        if (
-            previous_message != current_message
-            or current_message in {"Done", "Error", "Skipped"}
-        ):
+        if previous_message != current_message or current_message in {
+            "Done",
+            "Error",
+            "Skipped",
+        }:
             event = self._append_event(
                 {
                     "timestamp": self._timestamp(),
@@ -784,7 +796,9 @@ class Client:
         """
 
         asyncio.run_coroutine_threadsafe(
-            self.add_event(level, message, kind=kind, details=details, broadcast=broadcast),
+            self.add_event(
+                level, message, kind=kind, details=details, broadcast=broadcast
+            ),
             app_state.loop,
         )
 
@@ -876,7 +890,10 @@ class Client:
 
         await self.add_event(
             "info",
-            f"Download finished with {len(self.completed_downloads)} file(s) and {len(errors)} error(s).",
+            (
+                "Download finished with "
+                f"{len(self.completed_downloads)} file(s) and {len(errors)} error(s)."
+            ),
             kind="job",
             details={
                 "downloads": self.completed_downloads[-10:],
@@ -976,12 +993,12 @@ class Client:
         - query: the query to process
         """
 
-        settings_dict = dict(self.downloader_settings)
+        settings_dict: Dict[str, Any] = dict(self.downloader_settings)
         if not app_state.web_settings.get("web_use_output_dir", False):
             settings_dict["output"] = self.get_download_output()
 
         settings_dict["simple_tui"] = True
-        downloader = Downloader(settings=settings_dict)
+        downloader = Downloader(settings=cast(DownloaderOptions, settings_dict))
         downloader.progress_handler = ProgressHandler(
             simple_tui=True,
             update_callback=self.song_update,
@@ -1075,12 +1092,14 @@ class Client:
             "message": message,
             "overall_progress": round(
                 (
-                    progress_handler.parent.overall_progress
-                    / progress_handler.parent.overall_total
-                    * 100
-                )
-                if progress_handler.parent.overall_total
-                else 0,
+                    (
+                        progress_handler.parent.overall_progress
+                        / progress_handler.parent.overall_total
+                        * 100
+                    )
+                    if progress_handler.parent.overall_total
+                    else 0
+                ),
                 1,
             ),
             "overall_completed": progress_handler.parent.overall_completed_tasks,
@@ -1107,7 +1126,9 @@ class Client:
         if instance:
             return instance
 
-        app_state.logger.debug("Client %s not found in active dashboard sessions", client_id)
+        app_state.logger.debug(
+            "Client %s not found in active dashboard sessions", client_id
+        )
 
         return None
 
@@ -1158,7 +1179,7 @@ def get_client(client_id: Union[str, None] = Query(default=None)) -> Client:
     instance = Client.get_instance(client_id)
     if instance is None:
         instance = Client(None, client_id)
-        instance._refresh_completed_downloads_from_output()
+        instance.refresh_completed_downloads_from_output()
         app_state.clients[client_id] = instance
 
     return instance
@@ -1188,7 +1209,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         client.detach_websocket(websocket)
 
         if (
-            len([session for session in app_state.clients.values() if session.websocket])
+            len(
+                [session for session in app_state.clients.values() if session.websocket]
+            )
             == 0
             and app_state.web_settings["keep_alive"] is False
         ):
@@ -1201,9 +1224,16 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             # Wait 1 second before shutting down
             # This is to prevent the server from shutting down when a client
             # disconnects and reconnects quickly (e.g. when refreshing the page)
-            if len(
-                [session for session in app_state.clients.values() if session.websocket]
-            ) == 0:
+            if (
+                len(
+                    [
+                        session
+                        for session in app_state.clients.values()
+                        if session.websocket
+                    ]
+                )
+                == 0
+            ):
                 # Perform a clean exit
                 app_state.logger.info("Shutting down server, no active connections")
                 app_state.server.force_exit = True
@@ -1441,7 +1471,7 @@ def download_bundle(
     """
 
     if client.download_bundle is None:
-        client._refresh_completed_downloads_from_output()
+        client.refresh_completed_downloads_from_output()
 
     bundle = client.download_bundle
     if bundle is None:
@@ -1505,10 +1535,10 @@ def update_settings(
         return False
 
     # Create shallow copy of settings
-    settings_cpy = client.downloader_settings.copy()
+    settings_cpy: Dict[str, Any] = dict(client.downloader_settings)
 
     # Update settings with new settings that are not None
-    settings_cpy.update({k: v for k, v in settings.items() if v is not None})  # type: ignore
+    settings_cpy.update({k: v for k, v in settings.items() if v is not None})
 
     for key, default_value in DOWNLOADER_OPTIONS.items():
         if is_blank(settings_cpy.get(key)):

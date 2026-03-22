@@ -84,7 +84,8 @@ class Playlist(SongList):
                 if exc.http_status == 401:
                     raise PlaylistError(
                         "Spotify now requires user authentication to read playlist tracks. "
-                        "Run spotDL with --user-auth, or use the Windows launcher which adds it automatically for playlist links."
+                        "Run spotDL with --user-auth, or use the Windows launcher "
+                        "which adds it automatically for playlist links."
                     ) from exc
 
                 raise

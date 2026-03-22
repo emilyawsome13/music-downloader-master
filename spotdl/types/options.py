@@ -200,7 +200,7 @@ class WebOptionalOptions(TypedDict, total=False):
     key_file: Optional[str]
     cert_file: Optional[str]
     ca_file: Optional[str]
-    allowed_origins: Optional[str]
+    allowed_origins: Optional[List[str]]
     keep_sessions: bool
     force_update_gui: bool
     web_gui_repo: Optional[str]

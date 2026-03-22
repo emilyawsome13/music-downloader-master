@@ -10,10 +10,10 @@ import re
 import shutil
 import sys
 import traceback
-from urllib.parse import parse_qs, urlparse
 from argparse import Namespace
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from urllib.parse import parse_qs, urlparse
 
 from yt_dlp.postprocessor.modify_chapters import ModifyChaptersPP
 from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
@@ -584,7 +584,11 @@ class Downloader:
                 existing_path = output_file if output_file.exists() else None
                 if existing_path is None and len(dup_song_paths) > 0:
                     existing_path = next(
-                        (dup_song_path for dup_song_path in dup_song_paths if dup_song_path.exists()),
+                        (
+                            dup_song_path
+                            for dup_song_path in dup_song_paths
+                            if dup_song_path.exists()
+                        ),
                         None,
                     )
 
@@ -601,7 +605,11 @@ class Downloader:
                 existing_path = output_file if output_file.exists() else None
                 if existing_path is None and len(dup_song_paths) > 0:
                     existing_path = next(
-                        (dup_song_path for dup_song_path in dup_song_paths if dup_song_path.exists()),
+                        (
+                            dup_song_path
+                            for dup_song_path in dup_song_paths
+                            if dup_song_path.exists()
+                        ),
                         None,
                     )
 
@@ -900,7 +908,9 @@ class Downloader:
 
                 # Run the post processor to get the sponsor segments
                 _, download_info = post_processor.run(download_info)
-                chapters = download_info["sponsorblock_chapters"]
+                chapters: List[Dict[str, Any]] = []
+                if isinstance(download_info, dict):
+                    chapters = download_info.get("sponsorblock_chapters") or []
 
                 # If there are sponsor segments, remove them
                 if len(chapters) > 0:

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, cast
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,7 +73,7 @@ def _build_web_settings() -> WebOptions:
             ),
         }
     )
-    return WebOptions(**web_settings)
+    return cast(WebOptions, web_settings)
 
 
 def _build_output_template(web_settings: WebOptions) -> str:
@@ -121,42 +121,48 @@ def _build_downloader_settings(web_settings: WebOptions) -> DownloaderOptions:
                 os.environ.get("SPOTDL_FFMPEG_PATH")
                 or (str(ffmpeg_path) if ffmpeg_path else "ffmpeg")
             ),
-            "threads": _env_int("SPOTDL_THREADS", downloader_settings["threads"]),
+            "threads": _env_int(
+                "SPOTDL_THREADS", cast(int, downloader_settings["threads"])
+            ),
             "simple_tui": True,
             "log_level": log_level,
         }
     )
 
-    return DownloaderOptions(**downloader_settings)
+    return cast(DownloaderOptions, downloader_settings)
 
 
 def create_app() -> FastAPI:
+    """
+    Create the Render-hosted FastAPI application.
+    """
+
     fix_mime_types()
 
     web_settings = _build_web_settings()
     downloader_settings = _build_downloader_settings(web_settings)
 
-    app = FastAPI(
+    fastapi_app = FastAPI(
         title="spotDL Control Room",
         description="Hosted spotDL dashboard",
         version=__version__,
         dependencies=[Depends(get_current_state)],
     )
 
-    app_state.api = app
+    app_state.api = fastapi_app
     app_state.web_settings = web_settings
     app_state.downloader_settings = downloader_settings
     app_state.clients = {}
     app_state.logger = logging.getLogger("uvicorn.error")
 
-    @app.on_event("startup")
+    @fastapi_app.on_event("startup")
     async def _startup() -> None:
         app_state.loop = asyncio.get_running_loop()
         app_state.logger = logging.getLogger("uvicorn.error")
 
-    app.include_router(router)
+    fastapi_app.include_router(router)
 
-    app.add_middleware(
+    fastapi_app.add_middleware(
         CORSMiddleware,
         allow_origins=(
             ALLOWED_ORIGINS + web_settings["allowed_origins"]
@@ -168,14 +174,18 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    web_app_dir = Path(web_settings["web_gui_location"]).resolve()
-    app.mount(
+    web_gui_location = web_settings["web_gui_location"]
+    if web_gui_location is None:
+        raise RuntimeError("Render web GUI location is not configured")
+
+    web_app_dir = Path(web_gui_location).resolve()
+    fastapi_app.mount(
         "/",
         SPAStaticFiles(directory=web_app_dir, html=True),
         name="static",
     )
 
-    return app
+    return fastapi_app
 
 
 app = create_app()

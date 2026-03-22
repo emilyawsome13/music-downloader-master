@@ -3,7 +3,7 @@ import pytest
 from spotdl.providers.audio.base import AudioProviderError
 from spotdl.providers.audio.ytmusic import YouTubeMusic
 from spotdl.types.song import Song
-from spotdl.utils.spotify import SpotifyClient
+from spotdl.utils.spotify import SpotifyClient, SpotifyError
 from tests.conftest import new_initialize
 
 
@@ -429,3 +429,6 @@ def test_ytmusic_matching(monkeypatch, query, expected, capsys):
 
     except AudioProviderError:
         pytest.skip("YouTube Music search failed")
+
+    except SpotifyError:
+        pytest.skip("Spotify metadata lookup was rate limited")

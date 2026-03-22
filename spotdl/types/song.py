@@ -114,9 +114,7 @@ class Song:
             album_name=raw_album_meta["name"],
             album_artist=raw_album_meta["artists"][0]["name"],
             album_type=raw_album_meta.get("album_type"),
-            copyright_text=(
-                album_copyrights[0]["text"] if album_copyrights else None
-            ),
+            copyright_text=(album_copyrights[0]["text"] if album_copyrights else None),
             genres=album_genres + artist_genres,
             disc_number=raw_track_meta["disc_number"],
             disc_count=int(raw_album_meta["tracks"]["items"][-1]["disc_number"]),

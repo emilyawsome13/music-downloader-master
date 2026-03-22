@@ -5,6 +5,8 @@ or by parsing a query.
 To use this module you must first initialize the SpotifyClient.
 """
 
+# pylint: disable=too-many-lines
+
 import concurrent.futures
 import json
 import logging
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+from yt_dlp import YoutubeDL
 from ytmusicapi import YTMusic
 
 from spotdl.types.album import Album
@@ -141,8 +144,6 @@ def _resolve_youtube_artist_browse_id(url: str) -> Optional[str]:
 
     if YOUTUBE_ARTIST_URL_REGEX.match(url) is None:
         return None
-
-    from yt_dlp import YoutubeDL
 
     with YoutubeDL(
         {
@@ -291,7 +292,9 @@ def _build_ytm_song(
     if video_id is None or track.get("isAvailable") is False:
         return None
 
-    artists = [artist["name"] for artist in track.get("artists") or [] if artist.get("name")]
+    artists = [
+        artist["name"] for artist in track.get("artists") or [] if artist.get("name")
+    ]
     if len(artists) == 0:
         artists = [artist_name]
 
@@ -308,9 +311,9 @@ def _build_ytm_song(
         or artist_name
     )
     year = _parse_year(album.get("year"))
-    cover_url = _get_best_thumbnail_url(track.get("thumbnails")) or _get_best_thumbnail_url(
-        album.get("thumbnails")
-    )
+    cover_url = _get_best_thumbnail_url(
+        track.get("thumbnails")
+    ) or _get_best_thumbnail_url(album.get("thumbnails"))
     download_url = f"https://music.youtube.com/watch?v={video_id}"
 
     return Song.from_missing_data(
@@ -338,7 +341,9 @@ def _build_ytm_song(
         copyright_text=None,
         download_url=download_url,
         popularity=None,
-        album_id=album.get("browseId") or album.get("audioPlaylistId") or album.get("title"),
+        album_id=album.get("browseId")
+        or album.get("audioPlaylistId")
+        or album.get("title"),
         album_type=album.get("type"),
     )
 
@@ -407,8 +412,9 @@ def create_ytm_artist(url: str, fetch_songs: bool = True) -> Artist:
             album_entries.setdefault(result_browse_id, result)
 
     songs: List[Song] = []
-    albums: List[str] = []
+    albums: List[Album] = []
     seen_video_ids = set()
+    album_artist = {"name": artist_name, "id": browse_id}
 
     for album_browse_id in album_entries:
         album = ytm_client.get_album(album_browse_id)
@@ -416,7 +422,8 @@ def create_ytm_artist(url: str, fetch_songs: bool = True) -> Artist:
             continue
 
         album["browseId"] = album_browse_id
-        albums.append(f"https://music.youtube.com/browse/{album_browse_id}")
+        album_url = f"https://music.youtube.com/browse/{album_browse_id}"
+        album_songs: List[Song] = []
 
         for index, track in enumerate(album.get("tracks") or [], start=1):
             song = _build_ytm_song(track, artist_name, browse_id, album, index)
@@ -424,7 +431,19 @@ def create_ytm_artist(url: str, fetch_songs: bool = True) -> Artist:
                 continue
 
             seen_video_ids.add(song.song_id)
+            album_songs.append(song)
             songs.append(song)
+
+        if album_songs:
+            albums.append(
+                Album(
+                    name=album.get("title") or artist_name,
+                    artist=album_artist,
+                    url=album_url,
+                    urls=[song.url for song in album_songs],
+                    songs=album_songs,
+                )
+            )
 
     if len(songs) == 0:
         top_songs = (artist.get("songs") or {}).get("results") or []
