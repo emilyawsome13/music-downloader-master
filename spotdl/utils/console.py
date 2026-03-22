@@ -21,6 +21,18 @@ __all__ = [
 ]
 
 
+def _read_confirmation(prompt: str) -> str:
+    """
+    Read a confirmation prompt, defaulting to "no" when stdin is unavailable.
+    """
+
+    try:
+        return input(prompt)
+    except EOFError:
+        print("No interactive input available. Defaulting to 'N'.")
+        return ""
+
+
 def is_frozen():
     """
     Check if the application is frozen.
@@ -64,7 +76,9 @@ def generate_config():
 
     config_path = get_config_file()
     if config_path.exists():
-        overwrite_config = input("Config file already exists. Overwrite? (y/N): ")
+        overwrite_config = _read_confirmation(
+            "Config file already exists. Overwrite? (y/N): "
+        )
 
         if overwrite_config.lower() != "y":
             print("Exiting...")
@@ -94,7 +108,7 @@ def download_ffmpeg():
     """
 
     if get_local_ffmpeg() is not None or is_ffmpeg_installed():
-        overwrite_ffmpeg = input(
+        overwrite_ffmpeg = _read_confirmation(
             "FFmpeg is already installed. Do you want to overwrite it? (y/N): "
         )
 
@@ -105,6 +119,8 @@ def download_ffmpeg():
                 print(f"FFmpeg successfully downloaded to {local_ffmpeg.absolute()}")
             else:
                 print("FFmpeg download failed")
+        else:
+            print("Using existing FFmpeg installation.")
     else:
         print("Downloading FFmpeg...")
         download_path = ffmpeg_download()
