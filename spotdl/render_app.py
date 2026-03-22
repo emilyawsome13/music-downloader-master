@@ -12,10 +12,16 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from spotdl._version import __version__
-from spotdl.types.options import DownloaderOptions, WebOptions
-from spotdl.utils.config import DOWNLOADER_OPTIONS, WEB_OPTIONS, get_spotdl_path
+from spotdl.types.options import DownloaderOptions, SpotifyOptions, WebOptions
+from spotdl.utils.config import (
+    DOWNLOADER_OPTIONS,
+    WEB_OPTIONS,
+    get_cache_path,
+    get_spotdl_path,
+)
 from spotdl.utils.ffmpeg import get_ffmpeg_path
 from spotdl.utils.logging import NAME_TO_LEVEL
+from spotdl.utils.spotify import SpotifyClient, SpotifyError
 from spotdl.utils.web import (
     ALLOWED_ORIGINS,
     SPAStaticFiles,
@@ -132,6 +138,40 @@ def _build_downloader_settings(web_settings: WebOptions) -> DownloaderOptions:
     return cast(DownloaderOptions, downloader_settings)
 
 
+def _build_spotify_settings() -> SpotifyOptions:
+    spotify_settings = {
+        "client_id": (
+            os.environ.get("SPOTDL_CLIENT_ID")
+            or os.environ.get("SPOTIPY_CLIENT_ID")
+            or "5f573c9620494bae87890c0f08a60293"
+        ),
+        "client_secret": (
+            os.environ.get("SPOTDL_CLIENT_SECRET")
+            or os.environ.get("SPOTIPY_CLIENT_SECRET")
+            or "212476d9b0f3472eaa762d90b19b0ba8"
+        ),
+        "auth_token": os.environ.get("SPOTDL_AUTH_TOKEN"),
+        "user_auth": _env_bool("SPOTDL_USER_AUTH", False),
+        "headless": _env_bool("SPOTDL_HEADLESS", True),
+        "cache_path": os.environ.get("SPOTDL_CACHE_PATH", str(get_cache_path())),
+        "no_cache": _env_bool("SPOTDL_NO_CACHE", False),
+        "max_retries": _env_int("SPOTDL_MAX_RETRIES", 3),
+        "use_cache_file": _env_bool("SPOTDL_USE_CACHE_FILE", True),
+    }
+    return cast(SpotifyOptions, spotify_settings)
+
+
+def _ensure_spotify_client(spotify_settings: SpotifyOptions) -> None:
+    try:
+        SpotifyClient()
+        return
+    except SpotifyError as exc:
+        if "not created" not in str(exc):
+            raise
+
+    SpotifyClient.init(**spotify_settings)
+
+
 def create_app() -> FastAPI:
     """
     Create the Render-hosted FastAPI application.
@@ -141,6 +181,7 @@ def create_app() -> FastAPI:
 
     web_settings = _build_web_settings()
     downloader_settings = _build_downloader_settings(web_settings)
+    spotify_settings = _build_spotify_settings()
 
     fastapi_app = FastAPI(
         title="spotDL Control Room",
@@ -159,6 +200,7 @@ def create_app() -> FastAPI:
     async def _startup() -> None:
         app_state.loop = asyncio.get_running_loop()
         app_state.logger = logging.getLogger("uvicorn.error")
+        _ensure_spotify_client(spotify_settings)
 
     fastapi_app.include_router(router)
 

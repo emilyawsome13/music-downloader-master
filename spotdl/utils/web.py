@@ -214,7 +214,7 @@ class SPAStaticFiles(StaticFiles):
         return response
 
 
-class Client:
+class Client:  # pylint: disable=too-many-public-methods
     """
     Holds the client's state.
     """
