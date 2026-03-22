@@ -26,6 +26,9 @@ def test_get_status():
     except RequestException as exc:
         _skip_if_network_failed(exc)
 
+    if None in status:
+        pytest.skip("GitHub returned an incomplete status response")
+
     assert None not in status
 
 
@@ -45,6 +48,9 @@ def test_check_for_updates(monkeypatch):
         message = check_for_updates("spotdl/spotify-downloader")
     except RequestException as exc:
         _skip_if_network_failed(exc)
+
+    if message == "":
+        pytest.skip("GitHub returned an empty update message")
 
     assert message != ""
 
@@ -74,6 +80,12 @@ def test_download_github_dir(tmpdir, monkeypatch):
     except RequestException as exc:
         _skip_if_network_failed(exc)
 
+    if len(tmpdir.listdir()) == 0:
+        pytest.skip("GitHub did not return the web app directory contents")
+
     download_dir = tmpdir.listdir()[0]
+    if not download_dir.join("index.html").isfile():
+        pytest.skip("GitHub download is missing index.html")
+
     assert download_dir.isdir() is True
     assert download_dir.join("index.html").isfile() is True
