@@ -1,13 +1,15 @@
 const clientIdKey = "spotdl_dashboard_client_id";
 const deviceDeliveryKey = "spotdl_dashboard_deliver_to_device";
 const savedClientId = localStorage.getItem(clientIdKey);
-const clientId = savedClientId || crypto.randomUUID();
+let clientId = savedClientId || crypto.randomUUID();
 localStorage.setItem(clientIdKey, clientId);
 
 const state = {
     snapshot: null,
     socket: null,
     socketHeartbeat: null,
+    reconnectTimer: null,
+    manuallyClosingSocket: false,
     optionsModel: null,
     autoDeviceDeliveryArmed: false,
     deliveredBundlePath: null,
@@ -36,6 +38,8 @@ const elements = {
     outputInput: document.getElementById("outputInput"),
     deliverToDeviceCheckbox: document.getElementById("deliverToDeviceCheckbox"),
     downloadButton: document.getElementById("downloadButton"),
+    cancelButton: document.getElementById("cancelButton"),
+    newSessionButton: document.getElementById("newSessionButton"),
     refreshStateButton: document.getElementById("refreshStateButton"),
     statTotal: document.getElementById("statTotal"),
     statActive: document.getElementById("statActive"),
@@ -112,8 +116,44 @@ function persistDeviceDeliveryPreference() {
     localStorage.setItem(deviceDeliveryKey, shouldDeliverToDevice() ? "true" : "false");
 }
 
+function isActiveJob(status) {
+    return status === "starting" || status === "running";
+}
+
 function isFinishedJob(status) {
     return status === "complete" || status === "complete-with-errors";
+}
+
+function setClientId(nextClientId) {
+    clientId = nextClientId;
+    localStorage.setItem(clientIdKey, clientId);
+    elements.clientIdLabel.textContent = clientId;
+}
+
+function resetRenderedState(message = "Ready for a new session.") {
+    renderState({
+        job: {
+            status: "idle",
+            message,
+            resolved_count: 0,
+        },
+        stats: {
+            total: 0,
+            active: 0,
+            completed: 0,
+            failed: 0,
+            resolved: 0,
+            progress: 0,
+        },
+        songs: [],
+        downloads: [],
+        bundle: null,
+        events: [],
+        latest_update: null,
+        server: {
+            output_root: "-",
+        },
+    });
 }
 
 function triggerBundleDownload(bundle) {
@@ -342,6 +382,7 @@ function renderState(snapshot, websocketPayload = null) {
     elements.statResolved.textContent = `${stats.resolved} resolved`;
     elements.globalProgressBar.style.width = `${stats.progress}%`;
     elements.actionHint.textContent = job.message || "Ready";
+    elements.cancelButton.disabled = !isActiveJob(job?.status);
 
     renderQueue(songs || []);
     renderBundle(bundle || null, job?.status || "idle");
@@ -372,9 +413,14 @@ function connectWebSocket() {
 
     socket.addEventListener("open", async () => {
         state.socket = socket;
+        state.manuallyClosingSocket = false;
         setConnectionState("Live", true);
         if (state.socketHeartbeat) {
             clearInterval(state.socketHeartbeat);
+        }
+        if (state.reconnectTimer) {
+            clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = null;
         }
 
         state.socketHeartbeat = setInterval(() => {
@@ -394,11 +440,19 @@ function connectWebSocket() {
     });
 
     socket.addEventListener("close", () => {
+        if (state.socket === socket) {
+            state.socket = null;
+        }
         setConnectionState("Reconnecting", false);
         if (state.socketHeartbeat) {
             clearInterval(state.socketHeartbeat);
         }
-        setTimeout(connectWebSocket, 1500);
+        if (state.manuallyClosingSocket) {
+            state.manuallyClosingSocket = false;
+            return;
+        }
+
+        state.reconnectTimer = setTimeout(connectWebSocket, 1500);
     });
 
     socket.addEventListener("error", () => {
@@ -429,14 +483,63 @@ async function startDownload() {
 
         renderState(snapshot);
     } catch (error) {
-        elements.actionHint.textContent = error.message;
+        if (String(error.message || "").includes("already running")) {
+            await refreshState();
+            elements.actionHint.textContent = "A previous job is still active. Cancel it or start a new session.";
+        } else {
+            elements.actionHint.textContent = error.message;
+        }
         elements.debugOutput.textContent = error.stack || String(error);
     } finally {
         elements.downloadButton.disabled = false;
     }
 }
 
+async function cancelDownload() {
+    try {
+        elements.cancelButton.disabled = true;
+        const snapshot = await request(`/api/download/cancel?client_id=${encodeURIComponent(clientId)}`, {
+            method: "POST",
+        });
+
+        state.autoDeviceDeliveryArmed = false;
+        renderState(snapshot);
+        elements.actionHint.textContent = "Download cancelled. You can start another one now.";
+    } catch (error) {
+        elements.actionHint.textContent = error.message;
+        elements.debugOutput.textContent = error.stack || String(error);
+    }
+}
+
+function startFreshSession() {
+    state.autoDeviceDeliveryArmed = false;
+    state.deliveredBundlePath = null;
+
+    if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+    }
+
+    if (state.socketHeartbeat) {
+        clearInterval(state.socketHeartbeat);
+        state.socketHeartbeat = null;
+    }
+
+    if (state.socket) {
+        state.manuallyClosingSocket = true;
+        state.socket.close();
+        state.socket = null;
+    }
+
+    setClientId(crypto.randomUUID());
+    resetRenderedState("Fresh session created.");
+    setConnectionState("Reconnecting", false);
+    connectWebSocket();
+}
+
 elements.downloadButton.addEventListener("click", startDownload);
+elements.cancelButton.addEventListener("click", cancelDownload);
+elements.newSessionButton.addEventListener("click", startFreshSession);
 elements.refreshStateButton.addEventListener("click", refreshState);
 elements.deliverToDeviceCheckbox.addEventListener("change", persistDeviceDeliveryPreference);
 elements.clientIdLabel.textContent = clientId;

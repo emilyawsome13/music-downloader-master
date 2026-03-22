@@ -166,6 +166,13 @@ body::before {
     transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
 
+.ghost-button:disabled,
+.primary-button:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .ghost-button {
     background: rgba(122, 90, 67, 0.08);
     color: var(--ink);
@@ -411,6 +418,11 @@ textarea {
 .status-chip.error {
     background: rgba(147, 44, 44, 0.12);
     color: var(--danger);
+}
+
+.status-chip.cancelled {
+    background: rgba(98, 89, 79, 0.14);
+    color: var(--muted);
 }
 
 .status-chip.downloading,

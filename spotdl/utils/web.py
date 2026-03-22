@@ -248,6 +248,7 @@ class Client:
 
         self.downloader.progress_handler.web_ui = True
         self.download_task: Optional[asyncio.Task] = None
+        self.current_job_token = 0
         self.events: List[Dict[str, Any]] = []
         self.song_states: Dict[str, Dict[str, Any]] = {}
         self.completed_downloads: List[Dict[str, Any]] = []
@@ -261,7 +262,8 @@ class Client:
             "finished_at": None,
             "resolved_count": 0,
             "error": None,
-            "output_root": self.get_output_root(),
+            "output_root": self.get_session_root(),
+            "job_token": None,
         }
 
     def attach_websocket(self, websocket: WebSocket):
@@ -336,6 +338,7 @@ class Client:
             "done": "done",
             "error": "error",
             "skipped": "skipped",
+            "cancelled": "cancelled",
         }
         return mapping.get(message.strip().lower(), message.strip().lower())
 
@@ -347,12 +350,46 @@ class Client:
         - output directory root
         """
 
+        return self.current_job.get("output_root") or self.get_session_root()
+
+    def get_session_root(self) -> str:
+        """
+        Get the persistent root for this browser session.
+
+        ### Returns
+        - session root directory
+        """
+
         if app_state.web_settings.get("web_use_output_dir", False):
             return str(
                 Path(self.downloader_settings["output"].split("{", 1)[0]).absolute()
             )
 
         return str((get_spotdl_path() / f"web/sessions/{self.client_id}").absolute())
+
+    def _get_next_job_token(self) -> int:
+        """
+        Get the next monotonic token for this client's jobs.
+
+        ### Returns
+        - next job token
+        """
+
+        self.current_job_token += 1
+        return self.current_job_token
+
+    def _is_active_job_token(self, job_token: int) -> bool:
+        """
+        Check if the provided token is still the active job token.
+
+        ### Arguments
+        - job_token: token to validate
+
+        ### Returns
+        - whether the token matches the active job
+        """
+
+        return job_token == self.current_job_token
 
     def get_download_output(self) -> str:
         """
@@ -625,7 +662,7 @@ class Client:
             [
                 song
                 for song in song_list
-                if song.get("status") not in {"done", "error", "skipped"}
+                if song.get("status") not in {"done", "error", "skipped", "cancelled"}
             ]
         )
         progress = (
@@ -716,13 +753,17 @@ class Client:
 
         return event
 
-    async def handle_song_update(self, update: Dict[str, Any]):
+    async def handle_song_update(self, job_token: int, update: Dict[str, Any]):
         """
         Apply a song progress update and broadcast it.
 
         ### Arguments
+        - job_token: active job token for the update
         - update: serialized progress update
         """
+
+        if not self._is_active_job_token(job_token):
+            return
 
         song_data = update["song"]
         song = Song.from_dict(song_data)
@@ -807,6 +848,7 @@ class Client:
         query: str,
         songs: List[Song],
         output_root: str,
+        job_token: int,
     ):
         """
         Mark a query as resolved and initialize queue state.
@@ -817,6 +859,9 @@ class Client:
         - output_root: output directory root
         """
 
+        if not self._is_active_job_token(job_token):
+            return
+
         self.current_job.update(
             {
                 "status": "running",
@@ -825,6 +870,7 @@ class Client:
                 "resolved_count": len(songs),
                 "error": None,
                 "output_root": output_root,
+                "job_token": job_token,
             }
         )
 
@@ -843,13 +889,18 @@ class Client:
             "info",
             f"Resolved {len(songs)} songs for query.",
             kind="job",
-            details={"query": query, "output_root": output_root},
+            details={
+                "query": query,
+                "output_root": output_root,
+                "job_token": job_token,
+            },
         )
 
     async def finish_query_download(
         self,
         results: List[Any],
         errors: List[str],
+        job_token: int,
     ):
         """
         Finalize a query download and store result metadata.
@@ -858,6 +909,9 @@ class Client:
         - results: downloader results
         - errors: downloader error strings
         """
+
+        if not self._is_active_job_token(job_token):
+            return
 
         for song, path in results:
             song_state = self._ensure_song_state(song)
@@ -876,6 +930,7 @@ class Client:
                 "error": errors[0] if errors else None,
             }
         )
+        self.download_task = None
 
         for error in errors:
             self._append_event(
@@ -902,7 +957,9 @@ class Client:
             },
         )
 
-    async def fail_query_download(self, query: str, exception: Exception):
+    async def fail_query_download(
+        self, query: str, exception: Exception, job_token: int
+    ):
         """
         Mark the current query as failed.
 
@@ -910,6 +967,9 @@ class Client:
         - query: original query
         - exception: the exception raised
         """
+
+        if not self._is_active_job_token(job_token):
+            return
 
         self.current_job.update(
             {
@@ -920,6 +980,7 @@ class Client:
                 "error": str(exception),
             }
         )
+        self.download_task = None
 
         await self.add_event(
             "error",
@@ -927,6 +988,66 @@ class Client:
             kind="job",
             details=traceback.format_exc(),
         )
+
+    async def cancel_download_query(self) -> Dict[str, Any]:
+        """
+        Cancel the current download for this session.
+
+        ### Returns
+        - state snapshot
+        """
+
+        running_job = self.download_task and not self.download_task.done()
+        if not running_job and self.current_job.get("status") not in {
+            "starting",
+            "running",
+        }:
+            await self.add_event(
+                "info",
+                "No active download was running for this session.",
+                kind="job",
+            )
+            return self.get_state_snapshot()
+
+        cancelled_token = self.current_job.get("job_token")
+        self.current_job_token += 1
+
+        if self.download_task and not self.download_task.done():
+            self.download_task.cancel()
+
+        self.download_task = None
+
+        for song_state in self.song_states.values():
+            if song_state.get("status") not in {"done", "error", "skipped"}:
+                song_state.update(
+                    {
+                        "status": "cancelled",
+                        "message": "Cancelled",
+                        "updated_at": self._timestamp(),
+                    }
+                )
+
+        self.current_job.update(
+            {
+                "status": "cancelled",
+                "message": "Cancelled",
+                "finished_at": self._timestamp(),
+                "error": "Cancelled by user.",
+                "job_token": None,
+            }
+        )
+
+        await self.add_event(
+            "info",
+            "Download cancelled for this browser session.",
+            kind="job",
+            details={
+                "query": self.current_job.get("query"),
+                "job_token": cancelled_token,
+            },
+        )
+
+        return self.get_state_snapshot()
 
     async def start_download_query(self, query: str) -> Dict[str, Any]:
         """
@@ -945,6 +1066,11 @@ class Client:
                 detail="A download is already running for this browser session.",
             )
 
+        job_token = self._get_next_job_token()
+        output_root = self.get_session_root()
+        if not app_state.web_settings.get("web_use_output_dir", False):
+            output_root = str((Path(output_root) / f"job-{job_token}").absolute())
+
         self._delete_existing_bundle()
         self._clear_session_output_root()
         self.events = []
@@ -959,20 +1085,29 @@ class Client:
             "finished_at": None,
             "resolved_count": 0,
             "error": None,
-            "output_root": self.get_output_root(),
+            "output_root": output_root,
+            "job_token": job_token,
         }
 
         await self.add_event(
             "info",
             "Download queued.",
             kind="job",
-            details={"query": query, "output_root": self.get_output_root()},
+            details={
+                "query": query,
+                "output_root": output_root,
+                "job_token": job_token,
+            },
         )
 
-        self.download_task = asyncio.create_task(self._run_download_query_task(query))
+        self.download_task = asyncio.create_task(
+            self._run_download_query_task(query, job_token, output_root)
+        )
         return self.get_state_snapshot()
 
-    async def _run_download_query_task(self, query: str):
+    async def _run_download_query_task(
+        self, query: str, job_token: int, output_root: str
+    ):
         """
         Run a query download in a worker thread.
 
@@ -981,27 +1116,35 @@ class Client:
         """
 
         try:
-            await asyncio.to_thread(self._run_download_query_sync, query)
+            await asyncio.to_thread(
+                self._run_download_query_sync, query, job_token, output_root
+            )
         except Exception as exception:
-            await self.fail_query_download(query, exception)
+            await self.fail_query_download(query, exception, job_token)
 
-    def _run_download_query_sync(self, query: str):
+    def _run_download_query_sync(self, query: str, job_token: int, output_root: str):
         """
         Synchronous worker that resolves and downloads a query.
 
         ### Arguments
         - query: the query to process
+        - job_token: active job token
+        - output_root: output root reserved for the job
         """
 
         settings_dict: Dict[str, Any] = dict(self.downloader_settings)
         if not app_state.web_settings.get("web_use_output_dir", False):
-            settings_dict["output"] = self.get_download_output()
+            settings_dict["output"] = str(
+                (Path(output_root) / self.downloader_settings["output"]).absolute()
+            )
 
         settings_dict["simple_tui"] = True
         downloader = Downloader(settings=cast(DownloaderOptions, settings_dict))
         downloader.progress_handler = ProgressHandler(
             simple_tui=True,
-            update_callback=self.song_update,
+            update_callback=lambda tracker, message: self.song_update(
+                job_token, tracker, message
+            ),
         )
         downloader.progress_handler.web_ui = True
 
@@ -1017,6 +1160,9 @@ class Client:
         if len(queries) == 0:
             queries = [query]
 
+        if not self._is_active_job_token(job_token):
+            return
+
         songs = get_simple_songs(
             queries,
             use_ytm_data=downloader.settings["ytm_data"],
@@ -1031,14 +1177,17 @@ class Client:
             raise ValueError("No songs were found for this query.")
 
         asyncio.run_coroutine_threadsafe(
-            self.mark_query_resolved(query, songs, self.get_output_root()),
+            self.mark_query_resolved(query, songs, output_root, job_token),
             app_state.loop,
         ).result()
+
+        if not self._is_active_job_token(job_token):
+            return
 
         results = downloader.download_multiple_songs(songs)
 
         asyncio.run_coroutine_threadsafe(
-            self.finish_query_download(results, list(downloader.errors)),
+            self.finish_query_download(results, list(downloader.errors), job_token),
             app_state.loop,
         ).result()
 
@@ -1077,14 +1226,18 @@ class Client:
         except (RuntimeError, WebSocketDisconnect):
             self.websocket = None
 
-    def song_update(self, progress_handler: SongTracker, message: str):
+    def song_update(self, job_token: int, progress_handler: SongTracker, message: str):
         """
         Called when a song updates.
 
         ### Arguments
+        - job_token: active job token for the update
         - progress_handler: The progress handler.
         - message: The message to send.
         """
+
+        if not self._is_active_job_token(job_token):
+            return
 
         update_message = {
             "song": progress_handler.song.json,
@@ -1107,7 +1260,7 @@ class Client:
         }
 
         asyncio.run_coroutine_threadsafe(
-            self.handle_song_update(update_message), app_state.loop
+            self.handle_song_update(job_token, update_message), app_state.loop
         )
 
     @classmethod
@@ -1396,6 +1549,23 @@ async def download_query(
     return await client.start_download_query(stripped_query)
 
 
+@router.post("/api/download/cancel", response_model=None)
+async def cancel_query_download(
+    client: Client = Depends(get_client),
+) -> Dict[str, Any]:
+    """
+    Cancel the currently running query for this browser session.
+
+    ### Arguments
+    - client: the client's state
+
+    ### Returns
+    - current state snapshot
+    """
+
+    return await client.cancel_download_query()
+
+
 @router.post("/api/download/url")
 async def download_url(
     url: str,
@@ -1419,7 +1589,9 @@ async def download_url(
 
     client.downloader.progress_handler = ProgressHandler(
         simple_tui=True,
-        update_callback=client.song_update,
+        update_callback=lambda tracker, message: client.song_update(
+            client.current_job_token, tracker, message
+        ),
     )
 
     try:

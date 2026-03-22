@@ -76,6 +76,7 @@ def test_client_handle_song_update_tracks_stats(monkeypatch):
 
     asyncio.run(
         client.handle_song_update(
+            0,
             {
                 "song": song.json,
                 "progress": 48,
@@ -83,11 +84,12 @@ def test_client_handle_song_update_tracks_stats(monkeypatch):
                 "overall_progress": 48,
                 "overall_completed": 0,
                 "overall_total": 1,
-            }
+            },
         )
     )
     asyncio.run(
         client.handle_song_update(
+            0,
             {
                 "song": song.json,
                 "progress": 100,
@@ -95,7 +97,7 @@ def test_client_handle_song_update_tracks_stats(monkeypatch):
                 "overall_progress": 100,
                 "overall_completed": 1,
                 "overall_total": 1,
-            }
+            },
         )
     )
 
@@ -132,7 +134,7 @@ def test_finish_query_download_creates_bundle(monkeypatch, tmp_path):
     output_file = output_dir / "Dashboard Song.mp3"
     output_file.write_bytes(b"fake audio bytes")
 
-    asyncio.run(client.finish_query_download([(song, output_file)], []))
+    asyncio.run(client.finish_query_download([(song, output_file)], [], 0))
 
     snapshot = client.get_state_snapshot()
     bundle = snapshot["bundle"]
@@ -242,7 +244,7 @@ def test_finish_query_download_deduplicates_bundle_entries(monkeypatch, tmp_path
     output_file.write_bytes(b"fake audio bytes")
 
     asyncio.run(
-        client.finish_query_download([(song, output_file), (song, output_file)], [])
+        client.finish_query_download([(song, output_file), (song, output_file)], [], 0)
     )
 
     snapshot = client.get_state_snapshot()
@@ -292,7 +294,7 @@ def test_start_download_query_clears_session_output(monkeypatch, tmp_path):
     monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
     monkeypatch.setattr(web_utils, "get_spotdl_path", lambda: Path(tmp_path))
 
-    async def fake_run_download_query_task(_query):
+    async def fake_run_download_query_task(_query, _job_token, _output_root):
         return None
 
     created_queries = []
@@ -331,6 +333,7 @@ def test_start_download_query_clears_session_output(monkeypatch, tmp_path):
 
     assert not stale_file.exists()
     assert len(created_queries) == 1
+    assert client.current_job["output_root"].endswith("job-1")
 
 
 def test_handle_song_update_exposes_partial_downloads(monkeypatch, tmp_path):
@@ -360,6 +363,7 @@ def test_handle_song_update_exposes_partial_downloads(monkeypatch, tmp_path):
 
     asyncio.run(
         client.handle_song_update(
+            0,
             {
                 "song": song.json,
                 "progress": 100,
@@ -367,7 +371,7 @@ def test_handle_song_update_exposes_partial_downloads(monkeypatch, tmp_path):
                 "overall_progress": 50,
                 "overall_completed": 1,
                 "overall_total": 2,
-            }
+            },
         )
     )
 
@@ -433,6 +437,7 @@ def test_reconnect_preserves_existing_client_state(monkeypatch):
     song = _build_song()
     asyncio.run(
         client.handle_song_update(
+            0,
             {
                 "song": song.json,
                 "progress": 48,
@@ -440,7 +445,7 @@ def test_reconnect_preserves_existing_client_state(monkeypatch):
                 "overall_progress": 48,
                 "overall_completed": 0,
                 "overall_total": 1,
-            }
+            },
         )
     )
     client.detach_websocket(first_socket)
@@ -468,3 +473,89 @@ def test_favicon_route_serves_bundled_asset():
         "local-web-ui\\favicon.svg"
     ) or response_path.endswith("local-web-ui/favicon.svg")
     assert response.media_type == "image/svg+xml"
+
+
+def test_cancel_download_query_marks_session_cancelled(monkeypatch):
+    monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
+
+    web_utils.app_state.web_settings = {
+        "host": "127.0.0.1",
+        "port": 8800,
+        "keep_alive": True,
+        "web_use_output_dir": False,
+        "keep_sessions": True,
+    }
+    web_utils.app_state.downloader_settings = DownloaderOptions(
+        **create_settings_type(Namespace(config=False), {}, DOWNLOADER_OPTIONS)
+    )
+    web_utils.app_state.loop = asyncio.new_event_loop()
+
+    async def runner():
+        websocket = FakeWebSocket()
+        client = web_utils.Client(websocket, "cancel-test")
+        client.current_job_token = 1
+        client.current_job.update(
+            {
+                "status": "running",
+                "query": "ytartist: Test Artist",
+                "message": "Downloading",
+                "job_token": 1,
+            }
+        )
+        client.song_states["song-1"] = {
+            "status": "downloading",
+            "message": "Downloading",
+            "updated_at": client._timestamp(),
+        }
+
+        blocker = asyncio.create_task(asyncio.sleep(60))
+        client.download_task = blocker
+
+        snapshot = await client.cancel_download_query()
+        await asyncio.sleep(0)
+
+        assert snapshot["job"]["status"] == "cancelled"
+        assert snapshot["job"]["error"] == "Cancelled by user."
+        assert client.song_states["song-1"]["status"] == "cancelled"
+        assert client.download_task is None
+        assert blocker.cancelled()
+        assert client.current_job_token == 2
+
+    asyncio.run(runner())
+
+
+def test_stale_song_update_is_ignored_after_cancel(monkeypatch):
+    monkeypatch.setattr(web_utils, "Downloader", FakeDownloader)
+
+    web_utils.app_state.web_settings = {
+        "host": "127.0.0.1",
+        "port": 8800,
+        "keep_alive": True,
+        "web_use_output_dir": False,
+        "keep_sessions": True,
+    }
+    web_utils.app_state.downloader_settings = DownloaderOptions(
+        **create_settings_type(Namespace(config=False), {}, DOWNLOADER_OPTIONS)
+    )
+    web_utils.app_state.loop = asyncio.new_event_loop()
+
+    websocket = FakeWebSocket()
+    client = web_utils.Client(websocket, "stale-update-test")
+    client.current_job_token = 2
+
+    song = _build_song()
+    asyncio.run(
+        client.handle_song_update(
+            1,
+            {
+                "song": song.json,
+                "progress": 50,
+                "message": "Downloading",
+                "overall_progress": 50,
+                "overall_completed": 0,
+                "overall_total": 1,
+            },
+        )
+    )
+
+    assert client.song_states == {}
